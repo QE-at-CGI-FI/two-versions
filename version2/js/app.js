@@ -5,10 +5,17 @@
 
 // Constants
 const BREWING_FEE = 3;
+const FEATURED_PRICE = 34;
+const FEATURED_LIMIT = 7;
+const ORDER_CHOICES =
+    'input[name="base-potion"], input[name="size"], input[name="potency"], ' +
+    'input[name="ingredient"], input[name="delivery"]';
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 99;
 const SIZE_MULTIPLIERS = {
     vial: 1,
-    flask: 1.35,
-    bottle: 2.5
+    flask: 1.5,
+    bottle: 2
 };
 
 const POTION_NAMES = {
@@ -20,14 +27,60 @@ const POTION_NAMES = {
 
 const SIZE_NAMES = {
     vial: 'Vial (1x)',
-    flask: 'Flask (1.35x)',
-    bottle: 'Bottle (2.5x)'
+    flask: 'Flask (1.5x)',
+    bottle: 'Bottle (2x)'
+};
+
+const DELIVERY_NAMES = {
+    owl: 'Owl Post',
+    dragon: 'Dragon Express'
 };
 
 const POTENCY_NAMES = {
     standard: 'Standard',
     enhanced: 'Enhanced (+25%)',
     maximum: 'Maximum (+75%)'
+};
+
+// Delivery detail rules: each returns an error message, or '' when the value is valid
+const NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
+const PLACE_PATTERN = /^[\p{L}\p{M}\d][\p{L}\p{M}\d' .,&()-]*$/u;
+const ROOM_PATTERN = /^[\p{L}\p{M}\d][\p{L}\p{M}\d .,#\/-]*$/u;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const DELIVERY_FIELD_RULES = {
+    'customer-name': function(value) {
+        if (!value) return 'Please enter your full name.';
+        if (value.length < 2) return 'Name must be at least 2 characters.';
+        if (!NAME_PATTERN.test(value)) return 'Name can only contain letters, spaces, apostrophes, hyphens and periods.';
+        return '';
+    },
+    'contact-crystal': function(value) {
+        if (!value) return '';
+        if (!EMAIL_PATTERN.test(value)) return 'Please enter a valid email, e.g. gandalf@middle.earth.';
+        return '';
+    },
+    'castle-name': function(value) {
+        if (!value) return 'Please enter your castle or tower name.';
+        if (value.length < 2) return 'Castle/Tower name must be at least 2 characters.';
+        if (!PLACE_PATTERN.test(value)) return 'Castle/Tower name contains characters we cannot deliver to.';
+        return '';
+    },
+    'tower-number': function(value) {
+        if (!value) return '';
+        if (!ROOM_PATTERN.test(value)) return 'Tower/Room can only contain letters, numbers, spaces and , . # / -';
+        return '';
+    },
+    'kingdom': function(value) {
+        if (!value) return 'Please enter your kingdom or realm.';
+        if (value.length < 2) return 'Kingdom/Realm must be at least 2 characters.';
+        if (!PLACE_PATTERN.test(value)) return 'Kingdom/Realm contains characters we cannot deliver to.';
+        return '';
+    },
+    'special-instructions': function(value) {
+        if (value.length > 500) return 'Special instructions can be at most 500 characters.';
+        return '';
+    }
 };
 
 // State
@@ -43,14 +96,64 @@ let orderState = {
     quantity: 1,
     deliveryMethod: 'owl',
     deliveryPrice: 5,
-    featuredAdded: false
+    featuredCount: 0
 };
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
     initEventListeners();
-    updateOrderSummary();
+    initThemeToggle();
+    syncStateFromDom();
 });
+
+function initThemeToggle() {
+    const toggle = document.getElementById('theme-toggle');
+    updateThemeToggle(toggle);
+    toggle.addEventListener('click', function() {
+        const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+        try {
+            localStorage.setItem('theme', theme);
+        } catch (e) {
+            // Storage unavailable; theme still applies for this page view
+        }
+        updateThemeToggle(toggle);
+    });
+}
+
+function updateThemeToggle(toggle) {
+    const isLight = document.documentElement.dataset.theme === 'light';
+    toggle.textContent = isLight ? '🌙 Dark' : '☀️ Light';
+    toggle.setAttribute('aria-label', isLight ? 'Switch to dark mode' : 'Switch to light mode');
+}
+
+// Browsers may restore checked inputs on reload/back navigation without firing change events
+window.addEventListener('pageshow', syncStateFromDom);
+
+function syncStateFromDom() {
+    const potion = document.querySelector('input[name="base-potion"]:checked');
+    orderState.basePotion = potion ? potion.value : null;
+    orderState.basePotionPrice = potion ? parseInt(potion.dataset.price) : 0;
+
+    const size = document.querySelector('input[name="size"]:checked');
+    orderState.size = size.value;
+    orderState.sizeMultiplier = SIZE_MULTIPLIERS[size.value];
+
+    const potency = document.querySelector('input[name="potency"]:checked');
+    orderState.potency = potency.value;
+    orderState.potencyMultiplier = parseFloat(potency.dataset.multiplier);
+
+    const delivery = document.querySelector('input[name="delivery"]:checked');
+    orderState.deliveryMethod = delivery.value;
+    orderState.deliveryPrice = parseInt(delivery.dataset.price);
+
+    const quantity = parseInt(document.getElementById('quantity').value);
+    orderState.quantity = isNaN(quantity) ? MIN_QUANTITY : Math.min(Math.max(quantity, MIN_QUANTITY), MAX_QUANTITY);
+
+    setFeaturedSelection(featuredSelection());
+
+    handleIngredientChange();
+}
 
 function initEventListeners() {
     // Base potion selection
@@ -81,6 +184,21 @@ function initEventListeners() {
     const quantityInput = document.getElementById('quantity');
     quantityInput.addEventListener('change', handleQuantityChange);
     quantityInput.addEventListener('input', handleQuantityChange);
+    quantityInput.addEventListener('keydown', blockNonDigitKeys);
+    quantityInput.addEventListener('paste', blockNonDigitPaste);
+
+    // Potion of the Week quantity
+    const featuredInput = document.getElementById('featured-quantity');
+    featuredInput.addEventListener('change', handleFeaturedQuantityChange);
+    featuredInput.addEventListener('input', handleFeaturedQuantityChange);
+    featuredInput.addEventListener('keydown', blockNonDigitKeys);
+    featuredInput.addEventListener('paste', blockNonDigitPaste);
+    document.getElementById('featured-decrease').addEventListener('click', () => {
+        setFeaturedSelection(featuredSelection() - 1);
+    });
+    document.getElementById('featured-increase').addEventListener('click', () => {
+        setFeaturedSelection(featuredSelection() + 1);
+    });
 
     // Delivery method
     const deliveryRadios = document.querySelectorAll('input[name="delivery"]');
@@ -91,6 +209,39 @@ function initEventListeners() {
     // Form submission
     const orderForm = document.getElementById('order-form');
     orderForm.addEventListener('submit', handleFormSubmit);
+
+    // Clear order
+    document.getElementById('clear-order').addEventListener('click', clearOrder);
+
+    // Delivery details: check a field when leaving it, and re-check while fixing an error
+    Object.keys(DELIVERY_FIELD_RULES).forEach(id => {
+        const field = document.getElementById(id);
+        field.addEventListener('blur', () => validateDeliveryField(field));
+        field.addEventListener('input', () => {
+            if (field.getAttribute('aria-invalid') === 'true') validateDeliveryField(field);
+        });
+    });
+}
+
+function validateDeliveryField(field) {
+    const message = DELIVERY_FIELD_RULES[field.id](field.value.trim());
+    document.getElementById(field.id + '-error').textContent = message;
+    if (message) {
+        field.setAttribute('aria-invalid', 'true');
+    } else {
+        field.removeAttribute('aria-invalid');
+    }
+    return !message;
+}
+
+function validateDeliveryDetails() {
+    let firstInvalid = null;
+    Object.keys(DELIVERY_FIELD_RULES).forEach(id => {
+        const field = document.getElementById(id);
+        if (!validateDeliveryField(field) && !firstInvalid) firstInvalid = field;
+    });
+    if (firstInvalid) firstInvalid.focus();
+    return !firstInvalid;
 }
 
 function handlePotionChange(event) {
@@ -127,11 +278,35 @@ function handlePotencyChange(event) {
     updateOrderSummary();
 }
 
+// Whole positive numbers only: block minus, plus, decimal point and exponent
+function blockNonDigitKeys(event) {
+    if (['-', '+', '.', ',', 'e', 'E'].includes(event.key)) {
+        event.preventDefault();
+    }
+}
+
+function blockNonDigitPaste(event) {
+    const text = (event.clipboardData || window.clipboardData).getData('text');
+    if (!/^\d+$/.test(text.trim())) {
+        event.preventDefault();
+    }
+}
+
 function handleQuantityChange(event) {
-    const raw = parseInt(event.target.value) || 1;
-    const clamped = Math.max(1, Math.min(99, raw));
-    event.target.value = clamped;
-    orderState.quantity = clamped;
+    const input = event.target;
+    let quantity = parseInt(input.value);
+
+    if (isNaN(quantity)) {
+        // Let the field stay empty while typing; restore it once editing is done
+        quantity = MIN_QUANTITY;
+        if (event.type === 'change') input.value = quantity;
+    } else {
+        const typing = event.type === 'input' && quantity < MIN_QUANTITY;
+        quantity = Math.min(Math.max(quantity, MIN_QUANTITY), MAX_QUANTITY);
+        if (!typing && String(quantity) !== input.value) input.value = quantity;
+    }
+
+    orderState.quantity = quantity;
     updateOrderSummary();
 }
 
@@ -145,8 +320,9 @@ function handleDeliveryChange(event) {
 function changeQuantity(delta) {
     const input = document.getElementById('quantity');
     let newValue = parseInt(input.value) + delta;
-    if (newValue < 1) newValue = 1;
-    if (newValue > 99) newValue = 99;
+    if (isNaN(newValue)) newValue = MIN_QUANTITY;
+    if (newValue < MIN_QUANTITY) newValue = MIN_QUANTITY;
+    if (newValue > MAX_QUANTITY) newValue = MAX_QUANTITY;
     input.value = newValue;
     orderState.quantity = newValue;
     updateOrderSummary();
@@ -185,11 +361,12 @@ function updateOrderSummary() {
         potionSubtotal = orderState.basePotionPrice * orderState.sizeMultiplier * orderState.potencyMultiplier;
     }
 
-    // Add featured potion if added
-    let featuredTotal = 0;
-    if (orderState.featuredAdded) {
-        featuredTotal = 34; // 15% off 40 gold = 34 gold
-    }
+    // Featured potion (Potion of the Week) line
+    const featuredTotal = FEATURED_PRICE * orderState.featuredCount;
+    const summaryFeatured = document.getElementById('summary-featured');
+    summaryFeatured.hidden = orderState.featuredCount === 0;
+    summaryFeatured.querySelector('.item-name').textContent = 'Elixir of Eternal Focus × ' + orderState.featuredCount;
+    summaryFeatured.querySelector('.item-price').textContent = featuredTotal + ' gold';
 
     // Calculate subtotal (both potion and ingredients scale with quantity)
     let subtotal = (potionSubtotal + orderState.ingredientsTotal) * orderState.quantity + featuredTotal;
@@ -198,27 +375,103 @@ function updateOrderSummary() {
     const summarySubtotal = document.getElementById('summary-subtotal');
     summarySubtotal.querySelector('.item-price').textContent = subtotal.toFixed(2) + ' gold';
 
-    // Calculate total with brewing fee and delivery price
+    // Update delivery display
+    const summaryDelivery = document.getElementById('summary-delivery');
+    summaryDelivery.querySelector('.item-name').textContent = 'Delivery: ' + DELIVERY_NAMES[orderState.deliveryMethod];
+    summaryDelivery.querySelector('.item-price').textContent = orderState.deliveryPrice + ' gold';
+
+    // Calculate total with brewing fee and delivery
     let total = subtotal + BREWING_FEE + orderState.deliveryPrice;
 
     // Update total display
     const summaryTotal = document.getElementById('summary-total');
     summaryTotal.querySelector('.total-price').textContent = total.toFixed(2) + ' gold';
+
+    document.getElementById('clear-order').disabled = !hasOrderChanges();
 }
 
+// True when any price-affecting choice differs from the page defaults, i.e. there is something to clear
+function hasOrderChanges() {
+    const choices = document.querySelectorAll(ORDER_CHOICES);
+    const quantityInput = document.getElementById('quantity');
+    return orderState.featuredCount > 0 ||
+        quantityInput.value !== quantityInput.defaultValue ||
+        Array.from(choices).some(input => input.checked !== input.defaultChecked);
+}
+
+let featuredFeedbackTimer = null;
+
+// How many more Potions of the Week fit in the order
+function featuredRemaining() {
+    return FEATURED_LIMIT - orderState.featuredCount;
+}
+
+function featuredSelection() {
+    return parseInt(document.getElementById('featured-quantity').value) || 0;
+}
+
+// The quantity box only picks how many to add (1 up to what still fits); the order changes on Add to Order
+function setFeaturedSelection(count) {
+    const remaining = featuredRemaining();
+    const input = document.getElementById('featured-quantity');
+    input.min = Math.min(1, remaining);
+    input.max = remaining;
+    input.value = Math.min(Math.max(count, 1), remaining);
+    updateFeaturedControls();
+}
+
+function updateFeaturedControls() {
+    const selection = featuredSelection();
+    const remaining = featuredRemaining();
+    const btn = document.querySelector('.btn-featured');
+
+    document.getElementById('featured-decrease').disabled = selection <= 1;
+    document.getElementById('featured-increase').disabled = selection >= remaining;
+    btn.disabled = remaining === 0;
+
+    // Safari fires the box's change event mid-click on Add to Order: leave a showing confirmation alone, and
+    // never rewrite identical text, as replacing the text node under the pointer makes Safari drop the click
+    let text = btn.textContent;
+    if (remaining === 0) {
+        clearTimeout(featuredFeedbackTimer);
+        featuredFeedbackTimer = null;
+        text = 'Limit reached (' + FEATURED_LIMIT + ')';
+    } else if (!featuredFeedbackTimer) {
+        text = 'Add to Order';
+    }
+    if (btn.textContent !== text) btn.textContent = text;
+}
+
+function handleFeaturedQuantityChange(event) {
+    const count = parseInt(event.target.value);
+
+    if (isNaN(count)) {
+        // Let the field stay empty while typing; settle on 1 once editing is done
+        if (event.type === 'change') setFeaturedSelection(1);
+        return;
+    }
+    setFeaturedSelection(count);
+}
+
+// Adds the number in the quantity box to the order, up to the per-order limit
 function addFeaturedToOrder() {
-    orderState.featuredAdded = true;
+    const count = Math.min(featuredSelection(), featuredRemaining());
+    if (count <= 0) return;
+
+    orderState.featuredCount += count;
+    clearTimeout(featuredFeedbackTimer);
+    featuredFeedbackTimer = null;
+    setFeaturedSelection(featuredSelection());
     updateOrderSummary();
+    if (featuredRemaining() === 0) return;
 
     // Show feedback
     const btn = document.querySelector('.btn-featured');
-    btn.textContent = '✓ Added!';
-    btn.disabled = true;
-
-    setTimeout(() => {
+    btn.textContent = '✓ Added! (' + orderState.featuredCount + '/' + FEATURED_LIMIT + ')';
+    featuredFeedbackTimer = setTimeout(() => {
+        featuredFeedbackTimer = null;
         btn.textContent = 'Add to Order';
-        btn.disabled = false;
-    }, 2000);
+    }, 1500);
 }
 
 function handleFormSubmit(event) {
@@ -232,6 +485,8 @@ function handleFormSubmit(event) {
         return;
     }
 
+    if (!validateDeliveryDetails()) return;
+
     // Generate order number
     const orderNumber = 'EB-' + Math.floor(Math.random() * 90000 + 10000);
 
@@ -244,33 +499,28 @@ function handleFormSubmit(event) {
     document.getElementById('delivery-estimate').textContent = deliveryDays;
     modal.classList.add('active');
 
-    // Reset form DOM and orderState
+    // Reset the form and the potion builder so the next order starts fresh
     document.getElementById('order-form').reset();
-    orderState = {
-        basePotion: null,
-        basePotionPrice: 0,
-        size: 'vial',
-        sizeMultiplier: 1,
-        potency: 'standard',
-        potencyMultiplier: 1,
-        ingredients: [],
-        ingredientsTotal: 0,
-        quantity: 1,
-        deliveryMethod: 'owl',
-        deliveryPrice: 5,
-        featuredAdded: false
-    };
+    clearOrder();
+}
 
-    // Reset builder visual state
-    document.querySelectorAll('input[name="base-potion"]').forEach(r => r.checked = false);
-    document.querySelectorAll('input[name="size"]').forEach(r => r.checked = false);
-    document.querySelector('input[name="size"][value="vial"]').checked = true;
-    document.querySelectorAll('input[name="ingredient"]').forEach(c => c.checked = false);
-    document.querySelectorAll('input[name="potency"]').forEach(r => r.checked = false);
-    document.querySelector('input[name="potency"][value="standard"]').checked = true;
-    document.getElementById('quantity').value = '1';
+// Reset every price-affecting choice to the page defaults; delivery address fields are kept
+function clearOrder() {
+    const choices = document.querySelectorAll(ORDER_CHOICES);
+    choices.forEach(input => {
+        input.checked = input.defaultChecked;
+    });
 
-    updateOrderSummary();
+    const quantityInput = document.getElementById('quantity');
+    quantityInput.value = quantityInput.defaultValue;
+
+    orderState.featuredCount = 0;
+    clearTimeout(featuredFeedbackTimer);
+    featuredFeedbackTimer = null;
+    const featuredInput = document.getElementById('featured-quantity');
+    featuredInput.value = featuredInput.defaultValue;
+
+    syncStateFromDom();
 }
 
 function closeModal() {

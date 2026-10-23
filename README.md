@@ -2,8 +2,6 @@
 
 Two versions of the same tiny application in the same repo. One being easy test target, the other being harder with regards to finding problems.
 
-Version1b is a third version, brought in from the pnsqc26 repo (the PNSQC 2026 Social Software Testing tutorial test target).
-
 ## Getting started
 
 Install playwright npm init playwright@latest
@@ -26,8 +24,8 @@ npx playwright install chromium
 Then, from the repo root:
 
 ```bash
-npx playwright test                       # all versions (version1, version2, version1b)
-npx playwright test --project=version1b   # one version only
+npx playwright test                       # all versions (version1, version2)
+npx playwright test --project=version2    # one version only
 npx playwright test --ui                  # interactive UI mode
 npx playwright show-report                # open the HTML report from the last run
 ```

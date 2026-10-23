@@ -34,7 +34,7 @@ export default defineConfig({
   },
 
   /* One project per version of the app, all served from the repo root by webServer below */
-  projects: ['version1', 'version2', 'version1b'].map((version) => ({
+  projects: ['version1', 'version2'].map((version) => ({
     name: version,
     use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:8090/${version}/` },
   })),

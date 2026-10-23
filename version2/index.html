@@ -4,7 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Enchanted Brew Shop | Handcrafted Potions Since 1247</title>
-    <link rel="stylesheet" href="css/style.css">
+    <script>
+        // Apply saved or system theme before first paint to avoid a flash
+        (function() {
+            var theme;
+            try { theme = localStorage.getItem('theme'); } catch (e) {}
+            if (theme !== 'light' && theme !== 'dark') {
+                theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+            }
+            document.documentElement.dataset.theme = theme;
+        })();
+    </script>
+    <link rel="stylesheet" href="css/style.css?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -19,6 +30,7 @@
             <nav aria-label="Main navigation" class="header-info">
                 <span class="delivery-info">🦉 Owl Post: 3-5 days</span>
                 <span class="hours">Open dawn to dusk</span>
+                <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch to light mode">☀️ Light</button>
             </nav>
         </div>
     </header>
@@ -37,7 +49,15 @@
                         <span class="original-price">40 gold</span>
                         <span class="sale-price">34 gold</span>
                     </div>
-                    <button class="btn btn-featured" onclick="addFeaturedToOrder()">Add to Order</button>
+                    <div class="featured-actions">
+                        <div class="quantity-selector featured-quantity">
+                            <button type="button" class="qty-btn" id="featured-decrease" aria-label="Decrease Elixir of Eternal Focus quantity">−</button>
+                            <input type="number" id="featured-quantity" value="1" min="1" max="7" aria-label="Elixir of Eternal Focus quantity">
+                            <button type="button" class="qty-btn" id="featured-increase" aria-label="Increase Elixir of Eternal Focus quantity">+</button>
+                        </div>
+                        <button class="btn btn-featured" onclick="addFeaturedToOrder()">Add to Order</button>
+                    </div>
+                    <p class="featured-limit">Limit 7 per order</p>
                 </div>
             </div>
         </section>
@@ -99,19 +119,19 @@
                             </div>
                         </label>
                         <label class="size-option">
-                            <input type="radio" name="size" value="flask" data-multiplier="1.35">
+                            <input type="radio" name="size" value="flask" data-multiplier="1.5">
                             <div class="size-content">
                                 <span class="size-icon">⚗️</span>
                                 <span class="size-name">Flask</span>
-                                <span class="size-detail">150ml · 1.35x price</span>
+                                <span class="size-detail">150ml · 1.5x price</span>
                             </div>
                         </label>
                         <label class="size-option">
-                            <input type="radio" name="size" value="bottle" data-multiplier="2.5">
+                            <input type="radio" name="size" value="bottle" data-multiplier="2">
                             <div class="size-content">
                                 <span class="size-icon">🍾</span>
                                 <span class="size-name">Bottle</span>
-                                <span class="size-detail">500ml · 2.5x price</span>
+                                <span class="size-detail">500ml · 2x price</span>
                             </div>
                         </label>
                     </div>
@@ -132,9 +152,9 @@
                             <span class="ingredient-price">+8 gold</span>
                         </label>
                         <label class="ingredient-option">
-                            <input type="checkbox" name="ingredient" value="phoenix-feather" data-price="18">
+                            <input type="checkbox" name="ingredient" value="phoenix-feather" data-price="20">
                             <span class="ingredient-name">🔥 Phoenix Feather</span>
-                            <span class="ingredient-price">+18 gold</span>
+                            <span class="ingredient-price">+20 gold</span>
                         </label>
                         <label class="ingredient-option">
                             <input type="checkbox" name="ingredient" value="enchanted-honey" data-price="5">
@@ -147,9 +167,9 @@
                             <span class="ingredient-price">+12 gold</span>
                         </label>
                         <label class="ingredient-option">
-                            <input type="checkbox" name="ingredient" value="starlight-dew" data-price="10">
+                            <input type="checkbox" name="ingredient" value="starlight-dew" data-price="12">
                             <span class="ingredient-name">⭐ Starlight Dew</span>
-                            <span class="ingredient-price">+10 gold</span>
+                            <span class="ingredient-price">+12 gold</span>
                         </label>
                     </div>
                 </div>
@@ -212,10 +232,18 @@
                         <span class="item-name">Quantity: 1</span>
                         <span class="item-price">-</span>
                     </div>
+                    <div class="summary-item" id="summary-featured" hidden>
+                        <span class="item-name">Elixir of Eternal Focus × 0</span>
+                        <span class="item-price">0 gold</span>
+                    </div>
                     <div class="summary-divider"></div>
                     <div class="summary-item" id="summary-subtotal">
                         <span class="item-name">Subtotal</span>
                         <span class="item-price">0 gold</span>
+                    </div>
+                    <div class="summary-item" id="summary-delivery">
+                        <span class="item-name">Delivery: Owl Post</span>
+                        <span class="item-price">5 gold</span>
                     </div>
                     <div class="summary-item brewing-fee">
                         <span class="item-name">Brewing Fee</span>
@@ -224,8 +252,9 @@
                     <div class="summary-divider"></div>
                     <div class="summary-total" id="summary-total">
                         <span class="total-label">Total</span>
-                        <span class="total-price">3 gold</span>
+                        <span class="total-price">8 gold</span>
                     </div>
+                    <button type="button" class="btn btn-clear" id="clear-order" disabled>Clear Order</button>
                 </div>
             </aside>
         </div>
@@ -233,31 +262,36 @@
         <!-- Customer Information -->
         <section class="customer-info">
             <h2 class="section-title">📋 Delivery Details</h2>
-            <form id="order-form" class="order-form">
+            <form id="order-form" class="order-form" novalidate>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="customer-name">Full Name *</label>
-                        <input type="text" id="customer-name" placeholder="e.g., Gandalf the Grey" required>
+                        <input type="text" id="customer-name" placeholder="e.g., Gandalf the Grey" required maxlength="60" autocomplete="name" aria-describedby="customer-name-error">
+                        <span class="field-error" id="customer-name-error" aria-live="polite"></span>
                     </div>
                     <div class="form-group">
-                        <label for="contact-crystal">Contact Crystal</label>
-                        <input type="text" id="contact-crystal" placeholder="Contact Crystal (email)">
+                        <label for="contact-crystal">Contact Crystal (email)</label>
+                        <input type="email" id="contact-crystal" placeholder="e.g., gandalf@middle.earth" maxlength="100" autocomplete="email" aria-describedby="contact-crystal-error">
+                        <span class="field-error" id="contact-crystal-error" aria-live="polite"></span>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="castle-name">Castle/Tower Name *</label>
-                        <input type="text" id="castle-name" placeholder="e.g., Hogwarts Castle" required>
+                        <input type="text" id="castle-name" placeholder="e.g., Hogwarts Castle" required maxlength="80" aria-describedby="castle-name-error">
+                        <span class="field-error" id="castle-name-error" aria-live="polite"></span>
                     </div>
                     <div class="form-group">
                         <label for="tower-number">Tower/Room Number</label>
-                        <input type="text" id="tower-number" placeholder="e.g., Tower 7, Room 42">
+                        <input type="text" id="tower-number" placeholder="e.g., Tower 7, Room 42" maxlength="40" aria-describedby="tower-number-error">
+                        <span class="field-error" id="tower-number-error" aria-live="polite"></span>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group full-width">
                         <label for="kingdom">Kingdom/Realm *</label>
-                        <input type="text" id="kingdom" placeholder="e.g., The Northern Reaches" required>
+                        <input type="text" id="kingdom" placeholder="e.g., The Northern Reaches" required maxlength="80" aria-describedby="kingdom-error">
+                        <span class="field-error" id="kingdom-error" aria-live="polite"></span>
                     </div>
                 </div>
                 <div class="form-row">
@@ -286,7 +320,8 @@
                 <div class="form-row">
                     <div class="form-group full-width">
                         <label for="special-instructions">Special Instructions</label>
-                        <textarea id="special-instructions" rows="3" placeholder="Any special requests for your order..."></textarea>
+                        <textarea id="special-instructions" rows="3" placeholder="Any special requests for your order..." maxlength="500" aria-describedby="special-instructions-error"></textarea>
+                        <span class="field-error" id="special-instructions-error" aria-live="polite"></span>
                     </div>
                 </div>
                 <div class="form-actions">
@@ -374,6 +409,6 @@
         </div>
     </footer>
 
-    <script src="js/app.js"></script>
+    <script src="js/app.js?v=3"></script>
 </body>
 </html>
